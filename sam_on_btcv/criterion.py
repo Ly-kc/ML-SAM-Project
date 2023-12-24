@@ -16,6 +16,7 @@ from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
 def dice_loss(pred, gt):
     '''
+    简单定义的dice loss
     pred: (batch_size, H, W)
     gt: (H, W)
     '''
@@ -26,6 +27,9 @@ def dice_loss(pred, gt):
     return loss
 
 def test(organ_id=8, gt_base='../data/processed/Training', pred_base = '../results/test'):
+    '''
+    对某一类器官分割后保存的结果计算dice loss
+    '''
     organ_name = id_to_label[organ_id]
     pred_dir = join(pred_base, organ_name)
     gt_dir = join(gt_base,  organ_name)
@@ -43,8 +47,10 @@ def test(organ_id=8, gt_base='../data/processed/Training', pred_base = '../resul
     print(loss/len(pred_names))    
     
 
-#通过不同的prompt产生分割结果
 def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../data/processed/Training/All', save_base = '../results/test'):
+    '''
+    对某一类器官的所有图片进行分割，保存结果
+    '''
     if(sam is None):
         sam = sam_model_registry["vit_b"](checkpoint="../ckpts/sam_vit_b_01ec64.pth").cuda()
     predictor = SamPredictor(sam)
@@ -91,7 +97,6 @@ def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../da
         
         cv2.imwrite(join(save_dir, img_name), res_mask)
         
-        # break
 
 if __name__ == '__main__':
     generate_seg()    

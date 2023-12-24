@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 
 def vis_mask(mask_path):
+    '''
+    make mask image colorful
+    '''
     mask = np.array(cv2.imread(mask_path,-1))
     vis_mask = np.zeros(list(mask.shape) + [3])
     print(np.unique(mask))
@@ -13,6 +16,7 @@ def vis_mask(mask_path):
 
 def overlap_masks(img, masks):
     '''
+    save overlaped masks into one image for visualizaion
     input:
         img:input image (H,W,3)
         masks:dict of sam output format----keys:(segmentation, area, predicted_iou)
@@ -26,15 +30,5 @@ def overlap_masks(img, masks):
     
     return vis_img
 
-def save_single_mask(img, mask, save_path):
-    '''
-    save mask in png format
-    input:
-        img:input image
-        mask:dict of sam output format----keys:(segmentation, area, predicted_iou)
-    '''
-    vis_img = np.zeros_like(img)
-    vis_img[mask['segmentation']] = np.random.randint(0, 255, size=3)
-    
-    cv2.imwrite(save_path, vis_img)
+
         
