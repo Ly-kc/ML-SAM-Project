@@ -5,7 +5,7 @@ import os
 from os.path import join
 import tqdm
 
-from dataset_util import id_to_label
+from sam_on_btcv.preprocess_dataset import id_to_label
 from visualize import *
 
 from segment_anything import SamPredictor, sam_model_registry
@@ -26,7 +26,7 @@ def dice_loss(pred, gt):
     loss = (1 - 2*intersection / union).mean()  #(,)
     return loss
 
-def test(organ_id=8, gt_base='../data/processed/Training', pred_base = '../results/test'):
+def test(organ_id=8, gt_base='../data/processed/Training', pred_base = '../results/train'):
     '''
     对某一类器官分割后保存的结果计算dice loss
     '''
@@ -47,7 +47,7 @@ def test(organ_id=8, gt_base='../data/processed/Training', pred_base = '../resul
     print(loss/len(pred_names))    
     
 
-def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../data/processed/Training/All', save_base = '../results/test'):
+def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../data/processed/Training/All', save_base = '../results/train'):
     '''
     对某一类器官的所有图片进行分割，保存结果
     '''
@@ -87,9 +87,16 @@ def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../da
             prompts['point_labels'] = np.ones(sample_num)
             # print(prompts['point_coords'])
         
+        if('box' in prompt_class):
+            raise NotImplementedError
+        
+        
+        
+        
         masks, scores, logits = predictor.predict(
             **prompts,
         )
+        
         
         #save the most condifent mask only
         conf_id = np.argmax(scores)
@@ -99,5 +106,5 @@ def generate_seg(sam=None, organ_id=8, prompt_class=['point'], base_dir = '../da
         
 
 if __name__ == '__main__':
-    generate_seg()    
+    # generate_seg()    
     test()
