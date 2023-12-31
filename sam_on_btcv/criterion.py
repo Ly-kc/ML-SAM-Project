@@ -5,7 +5,7 @@ import os
 from os.path import join
 import tqdm
 
-from sam_on_btcv.preprocess_dataset import id_to_label
+from preprocess_dataset import id_to_label
 from visualize import *
 
 from segment_anything import SamPredictor, sam_model_registry
@@ -14,15 +14,16 @@ from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 #sam的输出：dict_keyes(['segmentation', 'area', 'bbox', 'predicted_iou', 'point_coords', 'stability_score', 'crop_box'])
 #我们的gt:与图片相同形状的label image，元素值是0-13的整数
 
+
 def dice_loss(pred, gt):
     '''
     简单定义的dice loss
-    pred: (batch_size, H, W)
+    pred: (batch_size, H, W) or (H, W)
     gt: (H, W)
     '''
-    ep = 1e-8
-    intersection = torch.sum(pred * gt) + ep  # (batch_size,)
-    union = torch.sum(pred, dim=(-2,-1)) + torch.sum(gt) + ep  # (batch_size,)
+    smooth = 1
+    intersection = torch.sum(pred * gt) + smooth  # (batch_size,)
+    union = torch.sum(pred, dim=(-2,-1)) + torch.sum(gt) + smooth  # (batch_size,)
     loss = (1 - 2*intersection / union).mean()  #(,)
     return loss
 
