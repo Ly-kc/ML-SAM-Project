@@ -22,6 +22,7 @@ class BtcvDataset(Dataset): #继承Dataset
         img_names = self.filter_img(img_names)
         self.img_name_list = img_names
         self.prompt_class = prompt_class
+        self.embed_computed = False
     
     def filter_img(self, img_names):
         filtered_img_names = []
@@ -40,18 +41,20 @@ class BtcvDataset(Dataset): #继承Dataset
         save_dir = join(embedding_dir, model_type)
         os.makedirs(save_dir, exist_ok=True)
         for img_name in tqdm.tqdm(self.img_name_list, desc='computing embeddings'):
-            embedding_path = join(embedding_dir, img_name.replace('img','embedding'))
+            embedding_path = join(save_dir, img_name.replace('.png','.pt'))
             if(os.path.exists(embedding_path)):
                 continue    
             img_path = join(self.data_dir, img_name)
             img = np.array(cv2.imread(img_path))
             predictor.set_image(img)
             embedding = predictor.get_image_embedding()
-            torch.save(embedding, embedding_path)     
+            torch.save(embedding, embedding_path) 
+        self.embed_computed = True    
     
     def get_embedding(self, img_name, embedding_dir = '../data/sam_embedding', model_type = 'vit_b'):
-        self.precompute_embeddings(embedding_dir, model_type)
-        return torch.load(join(embedding_dir, model_type, img_name.replace('img','embedding')))
+        if(not self.embed_computed):
+            self.precompute_embeddings(embedding_dir, model_type)
+        return torch.load(join(embedding_dir, model_type, img_name.replace('.png','.pt')))
     
     def __len__(self):#返回整个数据集图片的数目
         return len(self.img_name_list)
@@ -107,6 +110,7 @@ class BtcvDataset(Dataset): #继承Dataset
                 
             batch_prompts = {}
             for oid,prompt in enumerate(prompts):
+                # if(oid > 13): break
                 # print(prompt)
                 for key in prompt.keys():
                     if(key not in batch_prompts.keys()):
@@ -126,6 +130,13 @@ class CNN_Dataset(BtcvDataset):
         self.predictor = predictor
     
     def __getitem__(self, index):
+        '''
+        return:
+            img: original gray image of shape (H,W,3)
+            gt_label: label of each pixel (H,W)
+            appearance: 第i类器官是否在img中出现 (13,) dtype=bool        
+            pred_masks: (13,H,W), 代表13个binary mask, 其中获取第i个mask的prompt是从gt label中label为i+1的区域得到的。当appearance[i]=False时,pred_mask没有实际意义
+        '''
         img, embedding, gt_label, prompts, batch_prompts, appearance = super().__getitem__(index)
         if(self.split != 'test'):
             # get pred binary mask
@@ -135,7 +146,7 @@ class CNN_Dataset(BtcvDataset):
 
             pred_masks, iou_predictions, low_res_masks = self.predictor.my_predict(**batch_prompts)
         
-        return img, gt_label, pred_masks
+        return img, gt_label, pred_masks, appearance
     
     
 def btcv_collate_fn(batch):
@@ -146,8 +157,9 @@ def btcv_collate_fn(batch):
     :return prompts: list[dict{},dict{}...].每个dict代表图片中一个器官的prompt,dict的格式参考criterion.py的第76行
     :return appearance: torch.Tensor(B,13,dtype=bool). 图片中是否存在每个器官的gt
     '''
-    img, label, prompts, appearance = zip(*batch)
+    img, embedding, gt_label, prompts, batch_prompts, appearance = zip(*batch)
     img = np.stack(img, axis=0)
-    label = torch.from_numpy(np.stack(label, axis=0))
+    gt_label = torch.from_numpy(np.stack(gt_label, axis=0))
     appearance = np.stack(appearance, axis=0)
-    return img, label, prompts, appearance
+    # print(img, embedding, gt_label, prompts, batch_prompts, appearance)
+    return img, embedding, gt_label, prompts, batch_prompts, appearance

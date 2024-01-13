@@ -160,7 +160,7 @@ def process_to_gray(centers=None, widths=None, base_dir='../data',split='Trainin
             
 
 if __name__ == '__main__':
-    centers, widths = stat_center_width_for_organs()
+    # centers, widths = stat_center_width_for_organs()
     # print(centers,widths)
 
     process_to_gray(base_dir='../data',split='Training', discard=True)

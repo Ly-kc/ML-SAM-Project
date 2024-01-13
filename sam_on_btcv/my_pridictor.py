@@ -34,6 +34,7 @@ class MyPredictor(SamPredictor):
         self.model.prompt_encoder.eval()
         self.model.mask_decoder.train()
 
+    @torch.no_grad()
     def set_image(
         self,
         image: np.ndarray,
@@ -75,7 +76,6 @@ class MyPredictor(SamPredictor):
             self.features = self.model.image_encoder(input_image)
 
         self.is_image_set = True
-
 
     def my_predict(
         self,
