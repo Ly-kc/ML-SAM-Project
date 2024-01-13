@@ -22,30 +22,61 @@ class MyPredictor(SamPredictor):
         sam_model: Sam,
     ) -> None:
     
-    set_image(
-        self,
-        image: np.ndarray,
-        image_format: str = "RGB",
-    ) -> None:
-    
-    @torch.no_grad()
-    def set_torch_image(
-        self,
-        transformed_image: torch.Tensor,
-        original_image_size: Tuple[int, ...],
-    ) -> None:
-    
     get_image_embedding(self) -> torch.Tensor
     '''
     def __init__(
         self,
         sam_model: Sam,
+        embedding_dir: str = '../data/sam_embedding',
     ) -> None:
         super().__init__(sam_model)
         self.model.image_encoder.eval()
         self.model.prompt_encoder.eval()
         self.model.mask_decoder.train()
-    
+
+    def set_image(
+        self,
+        image: np.ndarray,
+        image_embedding: Optional[np.ndarray] = None,
+        image_format: str = "RGB",
+    ) -> None:
+        """
+        Calculates the image embeddings for the provided image, allowing
+        masks to be predicted with the 'predict' method.
+
+        Arguments:
+          image (np.ndarray): The image for calculating masks. Expects an
+            image in HWC uint8 format, with pixel values in [0, 255].
+          image_format (str): The color format of the image, in ['RGB', 'BGR'].
+        """
+        assert image_format in [
+            "RGB",
+            "BGR",
+        ], f"image_format must be in ['RGB', 'BGR'], is {image_format}."
+        if image_format != self.model.image_format:
+            image = image[..., ::-1]
+
+        # Transform the image to the form expected by the model
+        input_image = self.transform.apply_image(image)
+        input_image_torch = torch.as_tensor(input_image, device=self.device)
+        input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]
+
+        # self.set_torch_image(input_image_torch, image.shape[:2])
+        transformed_image, original_image_size = \
+            input_image_torch, image.shape[:2]
+        self.reset_image()
+        self.original_size = original_image_size
+        self.input_size = tuple(transformed_image.shape[-2:])
+
+        if(image_embedding is not None):
+            self.features = image_embedding.to(self.device)
+        else:
+            input_image = self.model.preprocess(transformed_image)
+            self.features = self.model.image_encoder(input_image)
+
+        self.is_image_set = True
+
+
     def my_predict(
         self,
         point_coords: Optional[np.ndarray] = None,
@@ -93,7 +124,8 @@ class MyPredictor(SamPredictor):
             multimask_output,
             return_logits=return_logits,
         )
-        masks = torch.functional.F.sigmoid(masks)
+        if(return_logits):
+            masks = torch.functional.F.sigmoid(masks)
         return masks, iou_predictions, low_res_masks
         masks_np = masks[0].detach().cpu().numpy()
         iou_predictions_np = iou_predictions[0].detach().cpu().numpy()

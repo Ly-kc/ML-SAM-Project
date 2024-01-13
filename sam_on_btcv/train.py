@@ -23,25 +23,18 @@ from criterion import dice_loss
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 @torch.no_grad()
-def validate(val_dataloder, my_predictor:MyPredictor):
+def validate(val_dataloader, my_predictor:MyPredictor):
     my_predictor.model.eval()
     dice = np.zeros(13)
     organ_count = np.zeros(13)
-    for img, label, prompts, appearance in tqdm.tqdm(val_dataloder, desc='validating...'):
+    for img,embedding, label, prompts,batch_prompts, appearance in tqdm.tqdm(val_dataloader):
         label = label[0].to(device, non_blocking=True)
         img = img[0]
         prompts = prompts[0]
         appearance = appearance[0]
         #将13个器官的prompts组合成一个batch的prompts
-        batch_prompts = {}
         batch_prompts['multimask_output'] = False
         batch_prompts['return_logits'] = True
-        for organ_id,prompt in enumerate(prompts):
-            for key in prompt.keys():
-                if(key not in batch_prompts.keys()):
-                    batch_prompts[key] = prompt[key][None]
-                else:
-                    batch_prompts[key] = np.concatenate([batch_prompts[key], prompt[key][None]], axis=0)
         
         my_predictor.set_image(img)
         masks, iou_predictions, low_res_masks = my_predictor.my_predict(**batch_prompts)
@@ -66,24 +59,16 @@ def train_one_epoch(train_dataloader, my_predictor:MyPredictor, optimizer):
     loss = None
     count = 0
     img_count = 0
-    for img, label, prompts, appearance in tqdm.tqdm(train_dataloader):
+    for img,embedding, label, prompts,batch_prompts, appearance in tqdm.tqdm(train_dataloader):
         label = label[0].to(device, non_blocking=True)
         img = img[0]
         prompts = prompts[0]
         appearance = appearance[0]
         #将13个器官的prompts组合成一个batch的prompts
-        batch_prompts = {}
         batch_prompts['multimask_output'] = False
         batch_prompts['return_logits'] = True
-        for oid,prompt in enumerate(prompts):
-            # print(prompt)
-            for key in prompt.keys():
-                if(key not in batch_prompts.keys()):
-                    batch_prompts[key] = prompt[key][None]
-                else:
-                    batch_prompts[key] = np.concatenate([batch_prompts[key], prompt[key][None]], axis=0)
         
-        my_predictor.set_image(img)
+        my_predictor.set_image(img, image_embedding=embedding)
         masks, iou_predictions, low_res_masks = my_predictor.my_predict(**batch_prompts)
         for organ_id in range(1, 14):
             if(not appearance[organ_id-1]):
@@ -139,8 +124,8 @@ def train_all():
         print('epoch:', epoch)
         train_one_epoch(train_dataloader, my_predictor, optimizer)
         validate(val_dataloader,my_predictor)
-        # if(epoch%5 == 0):
-            # torch.save(my_predictor.model.mask_decoder.state_dict(), '../ckpts/mask_decoder_{}.pth'.format(epoch))
+        if(epoch%5 == 0):
+            torch.save(my_predictor.model.mask_decoder.state_dict(), '../ckpts/mask_decoder_{}.pth'.format(epoch))
             # torch.save(my_predictor.model.image_encoder.state_dict(), '../ckpts/image_encoder_{}.pth'.format(epoch))
             # torch.save(my_predictor.model.prompt_encoder.state_dict(), '../ckpts/prompt_encoder_{}.pth'.format(epoch))
             # torch.save(optimizer.state_dict(), '../ckpts/optimizer_{}.pth'.format(epoch))

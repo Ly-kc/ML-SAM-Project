@@ -6,7 +6,10 @@ import os
 from os.path import join
 import cv2
 import numpy as np
+import tqdm
 
+from my_pridictor import MyPredictor
+from segment_anything import SamPredictor, sam_model_registry
 
 class BtcvDataset(Dataset): #继承Dataset
     def __init__(self, base_dir, split='train',prompt_class=['point']): #__init__是初始化该类的一些基础参数
@@ -31,6 +34,25 @@ class BtcvDataset(Dataset): #继承Dataset
             filtered_img_names.append(img_name)
         return filtered_img_names
                 
+    def precompute_embeddings(self, embedding_dir = '../data/sam_embedding', model_type = 'vit_b', checkpoint = '../ckpts/sam_vit_b_01ec64.pth'):
+        sam = sam_model_registry[model_type](checkpoint=checkpoint).cuda()
+        predictor = SamPredictor(sam)
+        save_dir = join(embedding_dir, model_type)
+        os.makedirs(save_dir, exist_ok=True)
+        for img_name in tqdm.tqdm(self.img_name_list, desc='computing embeddings'):
+            embedding_path = join(embedding_dir, img_name.replace('img','embedding'))
+            if(os.path.exists(embedding_path)):
+                continue    
+            img_path = join(self.data_dir, img_name)
+            img = np.array(cv2.imread(img_path))
+            predictor.set_image(img)
+            embedding = predictor.get_image_embedding()
+            torch.save(embedding, embedding_path)     
+    
+    def get_embedding(self, img_name, embedding_dir = '../data/sam_embedding', model_type = 'vit_b'):
+        self.precompute_embeddings(embedding_dir, model_type)
+        return torch.load(join(embedding_dir, model_type, img_name.replace('img','embedding')))
+    
     def __len__(self):#返回整个数据集图片的数目
         return len(self.img_name_list)
     
@@ -43,48 +65,79 @@ class BtcvDataset(Dataset): #继承Dataset
         :return appearance: np.ndarray(13,dtype=bool). 图片中是否存在每个器官的gt
         '''
         img_path = join(self.data_dir, self.img_name_list[index])
-        label_path = img_path.replace('img','mask')
         img = np.array(cv2.imread(img_path))
-        label = np.array(cv2.imread(label_path,-1))
+        if(self.split != 'test'):
+            label_path = img_path.replace('img','mask')
+            label = np.array(cv2.imread(label_path,-1))
 
         appearance = np.ones(13,dtype=bool)
         prompts = []
 
-        for organ_id in range(1, 14):
-            prompt = {}
-            mask = label == organ_id
-            if('point' in self.prompt_class):
-                sample_num = 2                
-                #sample points randomly in gt area
+        if(self.split != 'test'):
+            for organ_id in range(1, 14):
+                prompt = {}
+                mask = label == organ_id
                 pixels = mask.nonzero()
-                if(mask.nonzero()[0].shape[0] == 0): #如果gt中不存在该器官
-                    appearance[organ_id-1] = False
-                    rand_point = [[0,0] for i in range(sample_num)]
-                else:  
-                    rand_points = np.random.randint(low=0,high=pixels[0].shape[0],size=sample_num)
-                    rand_point = [[pixels[0][rand_points[i]],pixels[1][rand_points[i]]] for i in range(sample_num)]
-                #set parameter fot predict
-                prompt['point_coords'] = np.array(rand_point) 
-                prompt['point_labels'] = np.ones(sample_num)
-                # print(prompts['point_coords'])
-            if('box' in self.prompt_class):
-                pixels = mask.nonzero()
-                if(mask.nonzero()[0].shape[0] == 0):
-                    appearance[organ_id-1] = False
-                    box = np.array([0,0,0,0])
-                else:
-                    x1 = pixels[0].min()
-                    x2 = pixels[0].max()
-                    y1 = pixels[1].min()
-                    y2 = pixels[1].max()
-                box = np.array([x1, y1, x2, y2])
-                prompt['box'] = box
-            
-            prompts.append(prompt)
+                if('point' in self.prompt_class):
+                    sample_num = 2                
+                    #sample points randomly in gt area
+                    if(mask.nonzero()[0].shape[0] == 0): #如果gt中不存在该器官
+                        appearance[organ_id-1] = False
+                        rand_point = [[0,0] for i in range(sample_num)]
+                    else:  
+                        rand_points = np.random.randint(low=0,high=pixels[0].shape[0],size=sample_num)
+                        rand_point = [[pixels[0][rand_points[i]],pixels[1][rand_points[i]]] for i in range(sample_num)]
+                    #set parameter fot predict
+                    prompt['point_coords'] = np.array(rand_point) 
+                    prompt['point_labels'] = np.ones(sample_num)
+                    # print(prompts['point_coords'])
+                if('box' in self.prompt_class):
+                    if(mask.nonzero()[0].shape[0] == 0):
+                        appearance[organ_id-1] = False
+                        box = np.array([0,0,0,0])
+                    else:
+                        x1 = pixels[0].min()
+                        x2 = pixels[0].max()
+                        y1 = pixels[1].min()
+                        y2 = pixels[1].max()
+                    box = np.array([x1, y1, x2, y2])
+                    prompt['box'] = box
+                
+                prompts.append(prompt)
+                
+            batch_prompts = {}
+            for oid,prompt in enumerate(prompts):
+                # print(prompt)
+                for key in prompt.keys():
+                    if(key not in batch_prompts.keys()):
+                        batch_prompts[key] = prompt[key][None]
+                    else:
+                        batch_prompts[key] = np.concatenate([batch_prompts[key], prompt[key][None]], axis=0)
 
-        return img, label, prompts, appearance
+            return img, self.get_embedding(self.img_name_list[index]), label, prompts, batch_prompts, appearance
 
+        else:
+            return img, self.get_embedding(self.img_name_list[index]), None, None, None, None
+
+
+class CNN_Dataset(BtcvDataset):
+    def __init__(self, base_dir, predictor:MyPredictor, split='train',prompt_class=['point']):
+        super().__init__(base_dir, split, prompt_class, batchify_prompt=True)
+        self.predictor = predictor
+    
+    def __getitem__(self, index):
+        img, embedding, gt_label, prompts, batch_prompts, appearance = super().__getitem__(index)
+        if(self.split != 'test'):
+            # get pred binary mask
+            self.predictor.set_image(img, image_embedding=embedding)
+            batch_prompts['multimask_output'] = False
+            batch_prompts['return_logits'] = False
+
+            pred_masks, iou_predictions, low_res_masks = self.predictor.my_predict(**batch_prompts)
         
+        return img, gt_label, pred_masks
+    
+    
 def btcv_collate_fn(batch):
     '''
     :param batch: list[img,label,prompts,appearance]
